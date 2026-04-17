@@ -12,6 +12,9 @@
 #   # Codex Spark → Claude Sonnet に切替
 #   bash scripts/switch_cli.sh ashigaru3 --type claude --model claude-sonnet-4-6
 #
+#   # Cursor Sonnet → Claude Sonnet に切替
+#   bash scripts/switch_cli.sh ashigaru3 --type cursor --model claude-4.6-sonnet-medium
+#
 #   # 同一CLI内でモデルだけ変更（Sonnet → Opus）
 #   bash scripts/switch_cli.sh ashigaru3 --model claude-opus-4-6
 #
@@ -20,7 +23,7 @@
 #
 # Flow:
 #   1. (Optional) settings.yaml を更新
-#   2. 現在のCLIに /exit を送信
+#   2. 現在のCLIに終了コマンドを送信
 #   3. シェルプロンプトの復帰を待機
 #   4. build_cli_command() で新CLIコマンドを構築
 #   5. tmux send-keys で新CLIを起動
@@ -49,8 +52,8 @@ usage() {
     echo "Usage: $0 <agent_id> [--type <cli_type>] [--model <model_name>]"
     echo ""
     echo "  agent_id   karo, ashigaru1-7, gunshi"
-    echo "  --type     claude | codex | copilot | kimi"
-    echo "  --model    claude-sonnet-4-6 | claude-opus-4-6 | gpt-5.3-codex | etc."
+    echo "  --type     claude | codex | copilot | kimi | cursor"
+    echo "  --model    claude-sonnet-4-6 | claude-opus-4-6 | claude-4.6-sonnet-medium | gpt-5.3-codex | etc."
     echo ""
     echo "If --type/--model omitted, uses current settings.yaml values."
     exit 1
@@ -229,6 +232,11 @@ send_exit() {
             sleep 0.3
             tmux send-keys -t "$pane" Enter 2>/dev/null || true
             ;;
+        cursor)
+            tmux send-keys -t "$pane" "/quit" 2>/dev/null || true
+            sleep 0.3
+            tmux send-keys -t "$pane" Enter 2>/dev/null || true
+            ;;
         copilot|kimi)
             tmux send-keys -t "$pane" C-c 2>/dev/null || true
             sleep 0.5
@@ -354,7 +362,11 @@ if [[ -n "$NEW_MODEL" && -z "$NEW_TYPE" ]]; then
             NEW_TYPE="codex"
             log "Auto-inferred type=codex from model=${NEW_MODEL}"
             ;;
-        claude-*)
+        auto|composer-*|gpt-5|gpt-5-*|gpt-5.1*|gpt-5.2*|gpt-5.4*|gemini-*|grok-*|kimi-k2.5|claude-4.*)
+            NEW_TYPE="cursor"
+            log "Auto-inferred type=cursor from model=${NEW_MODEL}"
+            ;;
+        claude-sonnet-*|claude-opus-*|claude-haiku-*)
             NEW_TYPE="claude"
             log "Auto-inferred type=claude from model=${NEW_MODEL}"
             ;;
@@ -370,6 +382,12 @@ fi
 TARGET_CLI_TYPE=$(get_cli_type "$AGENT_ID")
 TARGET_MODEL=$(get_agent_model "$AGENT_ID")
 TARGET_CMD=$(build_cli_command "$AGENT_ID")
+TARGET_STARTUP_PROMPT=$(get_startup_prompt "$AGENT_ID")
+
+# Cursor CLIは位置引数のプロンプトが引用符破壊で壊れるため、CLI起動後に別送する
+if [[ -n "$TARGET_STARTUP_PROMPT" && "$TARGET_CLI_TYPE" != "cursor" ]]; then
+    TARGET_CMD="$TARGET_CMD \"$TARGET_STARTUP_PROMPT\""
+fi
 
 log "Target: cli=${TARGET_CLI_TYPE}, model=${TARGET_MODEL}, cmd=${TARGET_CMD}"
 
@@ -386,6 +404,15 @@ log "Launching new CLI: ${TARGET_CMD}"
 tmux send-keys -t "$PANE_TARGET" "$TARGET_CMD" 2>/dev/null || true
 sleep 0.3
 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+
+# Step 5.1: Cursor CLIの場合、起動後にプロンプトをリテラルモードで別送
+if [[ "$TARGET_CLI_TYPE" == "cursor" && -n "$TARGET_STARTUP_PROMPT" ]]; then
+    sleep 3
+    log "Sending startup prompt to Cursor CLI (literal mode)"
+    tmux send-keys -l -t "$PANE_TARGET" "$TARGET_STARTUP_PROMPT" 2>/dev/null || true
+    sleep 0.3
+    tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+fi
 
 # Step 6: tmux pane metadata 更新
 DISPLAY_NAME=$(get_model_display_name "$AGENT_ID")

@@ -634,15 +634,25 @@ log_success "  └─ 家老・足軽・軍師の陣、構築完了"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 6: Claude Code 起動（-s / --setup-only のときはスキップ）
+# STEP 6: AI CLI 起動（-s / --setup-only のときはスキップ）
 # ═══════════════════════════════════════════════════════════════════════════════
 if [ "$SETUP_ONLY" = false ]; then
     # CLI の存在チェック（Multi-CLI対応）
     if [ "$CLI_ADAPTER_LOADED" = true ]; then
-        _default_cli=$(get_cli_type "")
-        if ! validate_cli_availability "$_default_cli"; then
-            exit 1
-        fi
+        declare -A _validated_clis=()
+        for _agent in shogun "${AGENT_IDS[@]}"; do
+            _agent_cli=$(get_cli_type "$_agent")
+            if [[ -n "${_validated_clis[$_agent_cli]:-}" ]]; then
+                continue
+            fi
+            if ! validate_cli_availability "$_agent_cli"; then
+                exit 1
+            fi
+            _validated_clis["$_agent_cli"]=1
+            log_info "  └─ CLI確認: $_agent → ${_agent_cli} OK"
+        done
+        unset _validated_clis
+        unset _agent _agent_cli
     else
         if ! command -v claude &> /dev/null; then
             log_info "⚠️  claude コマンドが見つかりません"
@@ -656,7 +666,7 @@ if [ "$SETUP_ONLY" = false ]; then
     rm -f /tmp/shogun_idle_*
     echo "idle flags cleared"
 
-    log_war "👑 全軍に Claude Code を召喚中..."
+    log_war "👑 全軍に AI CLI を召喚中..."
 
     # 将軍: CLI Adapter経由でコマンド構築
     _shogun_cli_type="claude"
@@ -696,8 +706,9 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
         _karo_cmd=$(build_cli_command "karo")
     fi
     # Codex等の初期プロンプト付加（サジェストUI停止問題対策）
+    # Cursor CLIは位置引数のプロンプトが引用符破壊で壊れるため、CLI起動後に別送する
     _startup_prompt=$(get_startup_prompt "karo" 2>/dev/null)
-    if [[ -n "$_startup_prompt" ]]; then
+    if [[ -n "$_startup_prompt" && "$_karo_cli_type" != "cursor" ]]; then
         _karo_cmd="$_karo_cmd \"$_startup_prompt\""
     fi
     tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_karo_cli_type"
@@ -722,8 +733,9 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
                 fi
             fi
             # Codex等の初期プロンプト付加（サジェストUI停止問題対策）
+            # Cursor CLIは位置引数のプロンプトが引用符破壊で壊れるため、CLI起動後に別送する
             _startup_prompt=$(get_startup_prompt "ashigaru${i}" 2>/dev/null)
-            if [[ -n "$_startup_prompt" ]]; then
+            if [[ -n "$_startup_prompt" && "$_ashi_cli_type" != "cursor" ]]; then
                 _ashi_cmd="$_ashi_cmd \"$_startup_prompt\""
             fi
             tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_ashi_cli_type"
@@ -742,8 +754,9 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
                 _ashi_cmd=$(build_cli_command "ashigaru${i}")
             fi
             # Codex等の初期プロンプト付加（サジェストUI停止問題対策）
+            # Cursor CLIは位置引数のプロンプトが引用符破壊で壊れるため、CLI起動後に別送する
             _startup_prompt=$(get_startup_prompt "ashigaru${i}" 2>/dev/null)
-            if [[ -n "$_startup_prompt" ]]; then
+            if [[ -n "$_startup_prompt" && "$_ashi_cli_type" != "cursor" ]]; then
                 _ashi_cmd="$_ashi_cmd \"$_startup_prompt\""
             fi
             tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_ashi_cli_type"
@@ -762,8 +775,9 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
         _gunshi_cmd=$(build_cli_command "gunshi")
     fi
     # Codex等の初期プロンプト付加（サジェストUI停止問題対策）
+    # Cursor CLIは位置引数のプロンプトが引用符破壊で壊れるため、CLI起動後に別送する
     _startup_prompt=$(get_startup_prompt "gunshi" 2>/dev/null)
-    if [[ -n "$_startup_prompt" ]]; then
+    if [[ -n "$_startup_prompt" && "$_gunshi_cli_type" != "cursor" ]]; then
         _gunshi_cmd="$_gunshi_cmd \"$_startup_prompt\""
     fi
     tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_gunshi_cli_type"
@@ -851,16 +865,80 @@ NINJA_EOF
     echo -e "                               \033[0;36m[ASCII Art: syntax-samurai/ryu - CC0 1.0 Public Domain]\033[0m"
     echo ""
 
-    echo "  Claude Code の起動を待機中（最大30秒）..."
+    echo "  CLI の起動を待機中（最大30秒）..."
 
-    # 将軍の起動を確認（最大30秒待機）
-    for i in {1..30}; do
-        if tmux capture-pane -t shogun:main -p | grep -q "bypass permissions"; then
-            echo "  └─ 将軍の Claude Code 起動確認完了（${i}秒）"
-            break
+    if [ "$_shogun_cli_type" = "claude" ]; then
+        # Claude Code は起動完了の文字列を検出できる
+        for i in {1..30}; do
+            if tmux capture-pane -t shogun:main -p | grep -q "bypass permissions"; then
+                echo "  └─ 将軍の Claude Code 起動確認完了（${i}秒）"
+                break
+            fi
+            sleep 1
+        done
+    else
+        # Cursor/Codex/Copilot/Kimi は初期画面が異なるため短い待機で次へ進む
+        sleep 2
+        echo "  └─ 将軍の ${_shogun_cli_type} 起動待機完了"
+    fi
+
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 6.5.1: Cursor CLI エージェントに起動プロンプトを別送
+    # ═══════════════════════════════════════════════════════════════════
+    # Cursor CLI は位置引数のプロンプトにシェル引用符が混入して壊れるため、
+    # CLI 起動後に tmux send-keys -l（リテラルモード）で別送する。
+    if [ "$CLI_ADAPTER_LOADED" = true ]; then
+        _cursor_agents_found=false
+        # 将軍
+        if [[ "$_shogun_cli_type" == "cursor" ]]; then
+            _prompt=$(get_startup_prompt "shogun" 2>/dev/null)
+            if [[ -n "$_prompt" ]]; then
+                _cursor_agents_found=true
+                tmux send-keys -l -t "shogun:main" "$_prompt"
+                sleep 0.3
+                tmux send-keys -t "shogun:main" Enter
+            fi
         fi
-        sleep 1
-    done
+        # 家老
+        if [[ "$_karo_cli_type" == "cursor" ]]; then
+            _prompt=$(get_startup_prompt "karo" 2>/dev/null)
+            if [[ -n "$_prompt" ]]; then
+                _cursor_agents_found=true
+                p=$((PANE_BASE + 0))
+                tmux send-keys -l -t "multiagent:agents.${p}" "$_prompt"
+                sleep 0.3
+                tmux send-keys -t "multiagent:agents.${p}" Enter
+            fi
+        fi
+        # 足軽
+        for i in $(seq 1 "$_ASHIGARU_COUNT"); do
+            _ashi_cli=$(get_cli_type "ashigaru${i}" 2>/dev/null)
+            if [[ "$_ashi_cli" == "cursor" ]]; then
+                _prompt=$(get_startup_prompt "ashigaru${i}" 2>/dev/null)
+                if [[ -n "$_prompt" ]]; then
+                    _cursor_agents_found=true
+                    p=$((PANE_BASE + i))
+                    tmux send-keys -l -t "multiagent:agents.${p}" "$_prompt"
+                    sleep 0.3
+                    tmux send-keys -t "multiagent:agents.${p}" Enter
+                fi
+            fi
+        done
+        # 軍師
+        if [[ "$_gunshi_cli_type" == "cursor" ]]; then
+            _prompt=$(get_startup_prompt "gunshi" 2>/dev/null)
+            if [[ -n "$_prompt" ]]; then
+                _cursor_agents_found=true
+                p=$((PANE_BASE + _ASHIGARU_COUNT + 1))
+                tmux send-keys -l -t "multiagent:agents.${p}" "$_prompt"
+                sleep 0.3
+                tmux send-keys -t "multiagent:agents.${p}" Enter
+            fi
+        fi
+        if [ "$_cursor_agents_found" = true ]; then
+            log_info "  └─ Cursor エージェントに起動プロンプトを送信完了"
+        fi
+    fi
 
     # ═══════════════════════════════════════════════════════════════════
     # STEP 6.6: inbox_watcher起動（全エージェント）
@@ -1029,19 +1107,15 @@ echo "  ╚═══════════════════════
 echo ""
 
 if [ "$SETUP_ONLY" = true ]; then
-    echo "  ⚠️  セットアップのみモード: Claude Codeは未起動です"
+    echo "  ⚠️  セットアップのみモード: 各エージェントCLIは未起動です"
     echo ""
-    echo "  手動でClaude Codeを起動するには:"
+    echo "  CLIを自動起動するには '-s' なしで再実行してください:"
     echo "  ┌──────────────────────────────────────────────────────────┐"
-    echo "  │  # 将軍を召喚                                            │"
-    echo "  │  tmux send-keys -t shogun:main \\                         │"
-    echo "  │    'claude --dangerously-skip-permissions' Enter         │"
+    echo "  │  ./shutsujin_departure.sh                                 │"
     echo "  │                                                          │"
-    echo "  │  # 家老・足軽を一斉召喚                                  │"
-    echo "  │  for p in \$(seq $PANE_BASE $((PANE_BASE+8))); do                                 │"
-    echo "  │      tmux send-keys -t multiagent:agents.\$p \\            │"
-    echo "  │      'claude --dangerously-skip-permissions' Enter       │"
-    echo "  │  done                                                    │"
+    echo "  │  例: 将軍だけ現設定で手動起動                            │"
+    echo "  │  source ./lib/cli_adapter.sh                             │"
+    echo "  │  tmux send-keys -t shogun:main \"\$(build_cli_command shogun)\" Enter │"
     echo "  └──────────────────────────────────────────────────────────┘"
     echo ""
 fi

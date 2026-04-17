@@ -1,0 +1,18 @@
+---
+description: Bootstrap tmux-managed Cursor agents for multi-agent-shogun
+alwaysApply: true
+---
+
+# Cursor Agent Bootstrap
+
+If you are running inside a tmux-managed `multi-agent-shogun` agent pane:
+
+- Identify your role with `tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'`.
+- Read the matching role manual before handling inbox or task YAML:
+  `instructions/generated/cursor-shogun.md`,
+  `instructions/generated/cursor-karo.md`,
+  `instructions/generated/cursor-gunshi.md`,
+  or `instructions/generated/cursor-ashigaru.md` for any `ashigaru*`.
+- Use Cursor session commands: `/new-chat` to reset context, `/model <name>` to switch models, `/quit` to exit before relaunch.
+
+If you are not inside a tmux-managed agent pane, ignore these tmux-specific steps and continue normally.

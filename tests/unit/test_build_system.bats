@@ -4,7 +4,7 @@
 #
 # テスト構成:
 #   - ビルド実行テスト: スクリプト正常終了、ディレクトリ生成
-#   - ファイル生成テスト: claude/codex/copilot各ロールの生成確認
+#   - ファイル生成テスト: claude/codex/copilot/cursor各ロールの生成確認
 #   - 内容検証テスト: 空でないこと、ロール名・CLI固有セクション含有
 #   - AGENTS.md / copilot-instructions.md 生成テスト
 #   - 冪等性テスト: 2回ビルドで差分なし
@@ -131,6 +131,26 @@ setup() {
     [ -s "$OUTPUT_DIR/codex-ashigaru.md" ]
 }
 
+@test "content: cursor-shogun.md is not empty" {
+    [ -s "$OUTPUT_DIR/cursor-shogun.md" ]
+}
+
+# =============================================================================
+# ファイル生成テスト — Cursor
+# =============================================================================
+
+@test "cursor: cursor-shogun.md generated" {
+    [ -f "$OUTPUT_DIR/cursor-shogun.md" ]
+}
+
+@test "cursor: cursor-karo.md generated" {
+    [ -f "$OUTPUT_DIR/cursor-karo.md" ]
+}
+
+@test "cursor: cursor-ashigaru.md generated" {
+    [ -f "$OUTPUT_DIR/cursor-ashigaru.md" ]
+}
+
 # =============================================================================
 # 内容検証テスト — ロール名含有
 # =============================================================================
@@ -159,6 +179,10 @@ setup() {
     grep -qi "ashigaru\|足軽" "$OUTPUT_DIR/codex-ashigaru.md"
 }
 
+@test "content: cursor-shogun.md contains shogun role reference" {
+    grep -qi "shogun\|将軍" "$OUTPUT_DIR/cursor-shogun.md"
+}
+
 # =============================================================================
 # 内容検証テスト — CLI固有セクション
 # =============================================================================
@@ -174,6 +198,10 @@ setup() {
 
 @test "content: copilot files contain Copilot-specific content [Phase 2+3]" {
     grep -qi "copilot\|Copilot" "$OUTPUT_DIR/copilot-shogun.md"
+}
+
+@test "content: cursor files contain Cursor-specific content" {
+    grep -qi "Cursor CLI\|agent login\|agent --force\|/new-chat" "$OUTPUT_DIR/cursor-shogun.md"
 }
 
 # =============================================================================
@@ -199,6 +227,18 @@ setup() {
 @test "copilot-inst: contains Copilot-specific content [Phase 2+3]" {
     [ -f "$PROJECT_ROOT/.github/copilot-instructions.md" ] && \
         grep -qi "copilot" "$PROJECT_ROOT/.github/copilot-instructions.md"
+}
+
+# =============================================================================
+# Cursor rule 生成テスト
+# =============================================================================
+
+@test "cursor-rule: .cursor/rules/cursor-agent-bootstrap.mdc generated" {
+    [ -f "$PROJECT_ROOT/.cursor/rules/cursor-agent-bootstrap.mdc" ]
+}
+
+@test "cursor-rule: bootstrap rule mentions tmux role loading" {
+    grep -qi "tmux-managed\|cursor-shogun\|/new-chat" "$PROJECT_ROOT/.cursor/rules/cursor-agent-bootstrap.mdc"
 }
 
 # =============================================================================

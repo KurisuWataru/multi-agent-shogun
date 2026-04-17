@@ -123,6 +123,27 @@ YAML
 cli:
   default: kimi
 YAML
+
+    # cursor CLI settings
+    cat > "${TEST_TMP}/settings_cursor.yaml" << 'YAML'
+cli:
+  default: claude
+  agents:
+    shogun:
+      type: cursor
+      model: claude-4.6-sonnet-medium-thinking
+    ashigaru6:
+      type: cursor
+      model: claude-4.6-sonnet-medium
+    ashigaru7:
+      type: cursor
+YAML
+
+    # cursor default settings
+    cat > "${TEST_TMP}/settings_cursor_default.yaml" << 'YAML'
+cli:
+  default: cursor
+YAML
 }
 
 teardown() {
@@ -206,6 +227,18 @@ load_adapter_with() {
     load_adapter_with "${TEST_TMP}/settings_kimi_default.yaml"
     result=$(get_cli_type "ashigaru1")
     [ "$result" = "kimi" ]
+}
+
+@test "get_cli_type: cursor設定 ashigaru6 → cursor" {
+    load_adapter_with "${TEST_TMP}/settings_cursor.yaml"
+    result=$(get_cli_type "ashigaru6")
+    [ "$result" = "cursor" ]
+}
+
+@test "get_cli_type: cursorデフォルト設定 → cursor" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_cli_type "ashigaru1")
+    [ "$result" = "cursor" ]
 }
 
 @test "get_cli_type: 未定義agent → default継承" {
@@ -300,6 +333,18 @@ load_adapter_with() {
     [ "$result" = "kimi --yolo --model k2.5" ]
 }
 
+@test "build_cli_command: cursor + model → agent --force --model claude-4.6-sonnet-medium" {
+    load_adapter_with "${TEST_TMP}/settings_cursor.yaml"
+    result=$(build_cli_command "ashigaru6")
+    [ "$result" = "agent --force --model claude-4.6-sonnet-medium" ]
+}
+
+@test "build_cli_command: cursor (モデル指定なし) → agent --force --model claude-4.6-sonnet-medium" {
+    load_adapter_with "${TEST_TMP}/settings_cursor.yaml"
+    result=$(build_cli_command "ashigaru7")
+    [ "$result" = "agent --force --model claude-4.6-sonnet-medium" ]
+}
+
 @test "build_cli_command: cliセクションなし → claude フォールバック" {
     load_adapter_with "${TEST_TMP}/settings_none.yaml"
     result=$(build_cli_command "ashigaru1")
@@ -358,6 +403,18 @@ load_adapter_with() {
     [ "$result" = "instructions/generated/kimi-shogun.md" ]
 }
 
+@test "get_instruction_file: ashigaru6 + cursor → instructions/generated/cursor-ashigaru.md" {
+    load_adapter_with "${TEST_TMP}/settings_cursor.yaml"
+    result=$(get_instruction_file "ashigaru6")
+    [ "$result" = "instructions/generated/cursor-ashigaru.md" ]
+}
+
+@test "get_instruction_file: shogun + cursor → instructions/generated/cursor-shogun.md" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_instruction_file "shogun")
+    [ "$result" = "instructions/generated/cursor-shogun.md" ]
+}
+
 @test "get_instruction_file: cli_type引数で明示指定 (codex)" {
     load_adapter_with "${TEST_TMP}/settings_none.yaml"
     result=$(get_instruction_file "shogun" "codex")
@@ -368,6 +425,12 @@ load_adapter_with() {
     load_adapter_with "${TEST_TMP}/settings_none.yaml"
     result=$(get_instruction_file "karo" "copilot")
     [ "$result" = ".github/copilot-instructions-karo.md" ]
+}
+
+@test "get_instruction_file: cli_type引数で明示指定 (cursor)" {
+    load_adapter_with "${TEST_TMP}/settings_none.yaml"
+    result=$(get_instruction_file "gunshi" "cursor")
+    [ "$result" = "instructions/generated/cursor-gunshi.md" ]
 }
 
 @test "get_instruction_file: 全CLI × 全role組み合わせ" {
@@ -388,6 +451,10 @@ load_adapter_with() {
     [ "$(get_instruction_file shogun kimi)" = "instructions/generated/kimi-shogun.md" ]
     [ "$(get_instruction_file karo kimi)" = "instructions/generated/kimi-karo.md" ]
     [ "$(get_instruction_file ashigaru7 kimi)" = "instructions/generated/kimi-ashigaru.md" ]
+    # cursor
+    [ "$(get_instruction_file shogun cursor)" = "instructions/generated/cursor-shogun.md" ]
+    [ "$(get_instruction_file karo cursor)" = "instructions/generated/cursor-karo.md" ]
+    [ "$(get_instruction_file ashigaru7 cursor)" = "instructions/generated/cursor-ashigaru.md" ]
 }
 
 @test "get_instruction_file: 不明なagent_id → 空文字 + return 1" {
@@ -472,6 +539,37 @@ load_adapter_with() {
     [[ "$output" == *"Kimi CLI not found"* ]]
 }
 
+@test "validate_cli_availability: cursor mock (PATH操作 + logged in)" {
+    load_adapter_with "${TEST_TMP}/settings_none.yaml"
+    mkdir -p "${TEST_TMP}/bin"
+    cat > "${TEST_TMP}/bin/agent" << 'EOF'
+#!/bin/bash
+if [[ "$1" == "status" ]]; then
+  echo "Logged in"
+fi
+exit 0
+EOF
+    chmod +x "${TEST_TMP}/bin/agent"
+    PATH="${TEST_TMP}/bin:$PATH" run validate_cli_availability "cursor"
+    [ "$status" -eq 0 ]
+}
+
+@test "validate_cli_availability: cursor未ログイン → 1 + エラーメッセージ" {
+    load_adapter_with "${TEST_TMP}/settings_none.yaml"
+    mkdir -p "${TEST_TMP}/bin"
+    cat > "${TEST_TMP}/bin/agent" << 'EOF'
+#!/bin/bash
+if [[ "$1" == "status" ]]; then
+  echo "Not logged in"
+fi
+exit 0
+EOF
+    chmod +x "${TEST_TMP}/bin/agent"
+    PATH="${TEST_TMP}/bin:$PATH" run validate_cli_availability "cursor"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"agent login"* ]]
+}
+
 # =============================================================================
 # get_agent_model テスト
 # =============================================================================
@@ -546,6 +644,18 @@ load_adapter_with() {
     load_adapter_with "${TEST_TMP}/settings_kimi_default.yaml"
     result=$(get_agent_model "karo")
     [ "$result" = "k2.5" ]
+}
+
+@test "get_agent_model: cursor CLI shogun → claude-4.6-sonnet-medium-thinking (デフォルト)" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_agent_model "shogun")
+    [ "$result" = "claude-4.6-sonnet-medium-thinking" ]
+}
+
+@test "get_agent_model: cursor CLI ashigaru1 → claude-4.6-sonnet-medium (デフォルト)" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_agent_model "ashigaru1")
+    [ "$result" = "claude-4.6-sonnet-medium" ]
 }
 
 # =============================================================================
@@ -653,6 +763,20 @@ YAML
     [ "$result" = "Kimi" ]
 }
 
+@test "get_model_display_name: Cursor Sonnet Thinking → Sonnet+T" {
+    cat > "${TEST_TMP}/settings_display.yaml" << 'YAML'
+cli:
+  default: cursor
+  agents:
+    ashigaru7:
+      type: cursor
+      model: claude-4.6-sonnet-medium-thinking
+YAML
+    load_adapter_with "${TEST_TMP}/settings_display.yaml"
+    result=$(get_model_display_name "ashigaru7")
+    [ "$result" = "Sonnet+T" ]
+}
+
 @test "get_model_display_name: 全モデル × thinking組み合わせ" {
     cat > "${TEST_TMP}/settings_display_all.yaml" << 'YAML'
 cli:
@@ -747,4 +871,33 @@ YAML
     result=$(build_cli_command "ashigaru5")
     [[ "$result" != MAX_THINKING_TOKENS* ]]
     [[ "$result" == codex* ]]
+}
+
+# =============================================================================
+# get_startup_prompt テスト
+# =============================================================================
+
+@test "get_startup_prompt: cursor → role-specific instruction fileを含む" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_startup_prompt "ashigaru1")
+    [[ "$result" == *"instructions/generated/cursor-ashigaru.md"* ]]
+    [[ "$result" == *"queue/tasks/ashigaru1.yaml"* ]]
+}
+
+@test "get_startup_prompt: cursor karo → queue/tasks/karo.yaml ではなく command queue を参照" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_startup_prompt "karo")
+    [[ "$result" == *"instructions/generated/cursor-karo.md"* ]]
+    [[ "$result" == *"queue/inbox/karo.yaml"* ]]
+    [[ "$result" == *"queue/shogun_to_karo.yaml"* ]]
+    [[ "$result" != *"queue/tasks/karo.yaml"* ]]
+}
+
+@test "get_startup_prompt: cursor shogun → queue/tasks/shogun.yaml ではなく reports を参照" {
+    load_adapter_with "${TEST_TMP}/settings_cursor_default.yaml"
+    result=$(get_startup_prompt "shogun")
+    [[ "$result" == *"instructions/generated/cursor-shogun.md"* ]]
+    [[ "$result" == *"queue/inbox/shogun.yaml"* ]]
+    [[ "$result" == *"queue/shogun_to_karo.yaml"* ]]
+    [[ "$result" != *"queue/tasks/shogun.yaml"* ]]
 }

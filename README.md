@@ -4,7 +4,7 @@
 
 **Command your AI army like a feudal warlord.**
 
-Run 10 AI coding agents in parallel — **Claude Code, OpenAI Codex, GitHub Copilot, Kimi Code** — orchestrated through a samurai-inspired hierarchy with zero coordination overhead.
+Run 10 AI coding agents in parallel — **Claude Code, OpenAI Codex, Cursor CLI, GitHub Copilot, Kimi Code** — orchestrated through a samurai-inspired hierarchy with zero coordination overhead.
 
 **Talk Coding, not Vibe Coding. Speak to your phone, AI executes.**
 
@@ -32,7 +32,7 @@ Run 10 AI coding agents in parallel — **Claude Code, OpenAI Codex, GitHub Copi
 
 ## Quick Start
 
-**Requirements:** tmux, bash 4+, at least one of: [Claude Code](https://claude.ai/code) / Codex / Copilot / Kimi
+**Requirements:** tmux, bash 4+, at least one of: [Claude Code](https://claude.ai/code) / Codex / Cursor CLI / Copilot / Kimi
 
 ```bash
 git clone https://github.com/yohey-w/multi-agent-shogun
@@ -54,7 +54,7 @@ You watch the dashboard. That's it.
 
 ## What is this?
 
-**multi-agent-shogun** is a system that runs multiple AI coding CLI instances simultaneously, orchestrating them like a feudal Japanese army. Supports **Claude Code**, **OpenAI Codex**, **GitHub Copilot**, and **Kimi Code**.
+**multi-agent-shogun** is a system that runs multiple AI coding CLI instances simultaneously, orchestrating them like a feudal Japanese army. Supports **Claude Code**, **OpenAI Codex**, **Cursor CLI**, **GitHub Copilot**, and **Kimi Code**.
 
 **Why use it?**
 - One command spawns 7 AI workers + 1 strategist executing in parallel
@@ -91,7 +91,7 @@ Most multi-agent frameworks burn API tokens on coordination. Shogun doesn't.
 | **Architecture** | Subagents inside one process | Team lead + teammates (JSON mailbox) | Graph-based state machine | Role-based agents | Feudal hierarchy via tmux |
 | **Parallelism** | Sequential (one at a time) | Multiple independent sessions | Parallel nodes (v0.2+) | Limited | **8 independent agents** |
 | **Coordination cost** | API calls per Task | Token-heavy (each teammate = separate context) | API + infra (Postgres/Redis) | API + CrewAI platform | **Zero** (YAML + tmux) |
-| **Multi-CLI** | Claude Code only | Claude Code only | Any LLM API | Any LLM API | **4 CLIs** (Claude/Codex/Copilot/Kimi) |
+| **Multi-CLI** | Claude Code only | Claude Code only | Any LLM API | Any LLM API | **5 CLIs** (Claude/Codex/Cursor/Copilot/Kimi) |
 | **Observability** | Claude logs only | tmux split-panes or in-process | LangSmith integration | OpenTelemetry | **Live tmux panes** + dashboard |
 | **Skill discovery** | None | None | None | None | **Bottom-up auto-proposal** |
 | **Setup** | Built into Claude Code | Built-in (experimental) | Heavy (infra required) | pip install | Shell scripts |
@@ -121,12 +121,13 @@ Most AI coding tools charge per token. Running 8 Opus-grade agents through the A
 
 ### Multi-CLI Support
 
-Shogun isn't locked to one vendor. The system supports 4 CLI tools, each with unique strengths:
+Shogun isn't locked to one vendor. The system supports 5 CLI tools, each with unique strengths:
 
 | CLI | Key Strength | Default Model |
 |-----|-------------|---------------|
 | **Claude Code** | Battle-tested tmux integration, Memory MCP, dedicated file tools (Read/Write/Edit/Glob/Grep) | Claude Sonnet 4.6 |
 | **OpenAI Codex** | Sandbox execution, JSONL structured output, `codex exec` headless mode, **per-model `--model` flag** | gpt-5.3-codex / **gpt-5.3-codex-spark** |
+| **Cursor CLI** | Same Agent/Plan/Ask modes as the editor, `.cursor/rules` + `AGENTS.md` + `CLAUDE.md` auto-load, `/new-chat` and `/model` support | claude-4.6-sonnet-medium / claude-4.6-sonnet-medium-thinking |
 | **GitHub Copilot** | Built-in GitHub MCP, 4 specialized agents (Explore/Task/Plan/Code-review), `/delegate` to coding agent | Claude Sonnet 4.6 |
 | **Kimi Code** | Free tier available, strong multilingual support | Kimi k2 |
 
@@ -137,13 +138,17 @@ instructions/
 ├── common/              # Shared rules (all CLIs)
 ├── cli_specific/        # CLI-specific tool descriptions
 │   ├── claude_tools.md  # Claude Code tools & features
-│   └── copilot_tools.md # GitHub Copilot CLI tools & features
+│   ├── codex_tools.md   # OpenAI Codex CLI tools & features
+│   ├── copilot_tools.md # GitHub Copilot CLI tools & features
+│   ├── cursor_tools.md  # Cursor CLI tools & features
+│   └── kimi_tools.md    # Kimi Code CLI tools & features
 └── roles/               # Role definitions (shogun, karo, ashigaru)
     ↓ build
-CLAUDE.md / AGENTS.md / copilot-instructions.md  ← Generated per CLI
+CLAUDE.md / AGENTS.md / copilot-instructions.md / .cursor/rules/*.mdc  ← CLI auto-load surfaces
 ```
 
 One source of truth, zero sync drift. Change a rule once, all CLIs get it.
+Cursor uses `.cursor/rules` as a thin bootstrap layer and `instructions/generated/cursor-*.md` as the role-specific manual.
 
 ---
 
@@ -255,9 +260,13 @@ claude --dangerously-skip-permissions
 #    → Browser opens → Log in with Anthropic account → Return to CLI
 #    → "Bypass Permissions" prompt appears → Select "Yes, I accept" (↓ to option 2, Enter)
 #    → Type /exit to quit
+
+# 3. If you plan to run Cursor workers, authenticate Cursor once as well
+agent login
+agent status   # should no longer say "Not logged in"
 ```
 
-This saves credentials to `~/.claude/` — you won't need to do it again.
+Each CLI stores its own credentials locally, so you typically only need to authenticate once per machine.
 
 #### Daily startup
 
@@ -448,7 +457,7 @@ Then restart your computer and run `install.bat` again.
 
 ### What `shutsujin_departure.sh` does:
 - ✅ Creates tmux sessions (shogun + multiagent)
-- ✅ Launches Claude Code on all agents
+- ✅ Launches the configured AI CLI on all agents
 - ✅ Auto-loads instruction files for each agent
 - ✅ Resets queue files for a fresh state
 - ✅ Starts ntfy listener for phone notifications (if configured)
@@ -699,7 +708,7 @@ multiagent:agents.1            BUSY       ashigaru1
 multiagent:agents.8            BUSY       gunshi
 ```
 
-Detection works for both **Claude Code** and **Codex CLI** by checking CLI-specific prompt/spinner patterns in the bottom 5 lines of each tmux pane. The detection logic lives in `lib/agent_status.sh` — source it in your own scripts:
+Detection works for **Claude Code**, **Codex CLI**, and basic **Cursor CLI** screens by checking CLI-specific prompt/spinner patterns in the bottom 5 lines of each tmux pane. The detection logic lives in `lib/agent_status.sh` — source it in your own scripts:
 
 ```bash
 source lib/agent_status.sh
@@ -1438,7 +1447,7 @@ Priority: Token > Basic > None. If neither is set, no auth headers are sent (bac
 │      │                                                              │
 │      ├──▶ Reset queue files and dashboard                           │
 │      │                                                              │
-│      └──▶ Launch Claude Code on all agents                          │
+│      └──▶ Launch the configured AI CLI on all agents                │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -1449,10 +1458,10 @@ Priority: Token > Basic > None. If neither is set, no auth headers are sent (bac
 <summary><b>shutsujin_departure.sh Options</b> (click to expand)</summary>
 
 ```bash
-# Default: Full startup (tmux sessions + Claude Code launch)
+# Default: Full startup (tmux sessions + AI CLI launch)
 ./shutsujin_departure.sh
 
-# Session setup only (no Claude Code launch)
+# Session setup only (no AI CLI launch)
 ./shutsujin_departure.sh -s
 ./shutsujin_departure.sh --setup-only
 
@@ -1495,9 +1504,10 @@ tmux attach-session -t shogun     # Connect and give commands
 ```bash
 ./shutsujin_departure.sh -s       # Create sessions only
 
-# Manually launch Claude Code on specific agents
-tmux send-keys -t shogun:0 'claude --dangerously-skip-permissions' Enter
-tmux send-keys -t multiagent:0.0 'claude --dangerously-skip-permissions' Enter
+# Manually launch the configured CLI on specific agents
+source ./lib/cli_adapter.sh
+tmux send-keys -t shogun:0 "$(build_cli_command shogun)" Enter
+tmux send-keys -t multiagent:0.0 "$(build_cli_command karo)" Enter
 ```
 
 **Restart after crash:**
@@ -1550,11 +1560,14 @@ multi-agent-shogun/
 │   ├── gunshi.md             # Gunshi (strategist) instructions
 │   └── cli_specific/         # CLI-specific tool descriptions
 │       ├── claude_tools.md   # Claude Code tools & features
-│       └── copilot_tools.md  # GitHub Copilot CLI tools & features
+│       ├── codex_tools.md    # OpenAI Codex CLI tools & features
+│       ├── copilot_tools.md  # GitHub Copilot CLI tools & features
+│       ├── cursor_tools.md   # Cursor CLI tools & features
+│       └── kimi_tools.md     # Kimi Code CLI tools & features
 │
 ├── lib/
-│   ├── agent_status.sh       # Shared busy/idle detection (Claude Code + Codex)
-│   ├── cli_adapter.sh        # Multi-CLI adapter (Claude/Codex/Copilot/Kimi)
+│   ├── agent_status.sh       # Shared busy/idle detection (Claude Code + Codex + Cursor)
+│   ├── cli_adapter.sh        # Multi-CLI adapter (Claude/Codex/Cursor/Copilot/Kimi)
 │   └── ntfy_auth.sh          # ntfy authentication helper
 │
 ├── scripts/                  # Utility scripts
@@ -1785,11 +1798,11 @@ Even if you're not comfortable with keyboard shortcuts, you can switch, scroll, 
 
 ## What's New in v3.0 — Multi-CLI
 
-> **Shogun is no longer Claude-only.** Mix and match 4 AI coding CLIs in a single army.
+> **Shogun is no longer Claude-only.** Mix and match 5 AI coding CLIs in a single army.
 
-- **Multi-CLI as first-class architecture** — `lib/cli_adapter.sh` dynamically selects CLI per agent. Change one line in `settings.yaml` to swap any worker between Claude Code, Codex, Copilot, or Kimi
+- **Multi-CLI as first-class architecture** — `lib/cli_adapter.sh` dynamically selects CLI per agent. Change one line in `settings.yaml` to swap any worker between Claude Code, Codex, Cursor, Copilot, or Kimi
 - **OpenAI Codex CLI integration** — GPT-5.3-codex with `--dangerously-bypass-approvals-and-sandbox` for true autonomous execution. `--no-alt-screen` makes agent activity visible in tmux
-- **CLI bypass flag discovery** — `--full-auto` is NOT fully automatic (it's `-a on-request`). Documented the correct flags for all 4 CLIs
+- **CLI bypass flag discovery** — `--full-auto` is NOT fully automatic (it's `-a on-request`). Documented the correct flags for all 5 CLIs
 - **Hybrid architecture** — Command layer (Shogun + Karo) stays on Claude Code for Memory MCP and mailbox integration. Worker layer (Ashigaru) is CLI-agnostic
 - **Community-contributed CLI adapters** — Thanks to [@yuto-ts](https://github.com/yuto-ts) (cli_adapter.sh), [@circlemouth](https://github.com/circlemouth) (Codex support), [@koba6316](https://github.com/koba6316) (task routing)
 

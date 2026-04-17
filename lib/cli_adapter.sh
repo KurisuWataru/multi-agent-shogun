@@ -3,7 +3,7 @@
 # Multi-CLI統合設計書 (reports/design_multi_cli_support.md) §2.2 準拠
 #
 # 提供関数:
-#   get_cli_type(agent_id)                  → "claude" | "codex" | "copilot" | "kimi"
+#   get_cli_type(agent_id)                  → "claude" | "codex" | "copilot" | "kimi" | "cursor"
 #   build_cli_command(agent_id)             → 完全なコマンド文字列
 #   get_instruction_file(agent_id [,cli_type]) → 指示書パス
 #   validate_cli_availability(cli_type)     → 0=OK, 1=NG
@@ -16,7 +16,7 @@ CLI_ADAPTER_PROJECT_ROOT="$(cd "${CLI_ADAPTER_DIR}/.." && pwd)"
 CLI_ADAPTER_SETTINGS="${CLI_ADAPTER_SETTINGS:-${CLI_ADAPTER_PROJECT_ROOT}/config/settings.yaml}"
 
 # 許可されたCLI種別
-CLI_ADAPTER_ALLOWED_CLIS="claude codex copilot kimi"
+CLI_ADAPTER_ALLOWED_CLIS="claude codex copilot kimi cursor"
 
 # --- 内部ヘルパー ---
 
@@ -87,18 +87,18 @@ try:
         print('claude'); sys.exit(0)
     agents = cli.get('agents', {})
     if not isinstance(agents, dict):
-        print(cli.get('default', 'claude') if cli.get('default', 'claude') in ('claude','codex','copilot','kimi') else 'claude')
+        print(cli.get('default', 'claude') if cli.get('default', 'claude') in ('claude','codex','copilot','kimi','cursor') else 'claude')
         sys.exit(0)
     agent_cfg = agents.get('${agent_id}')
     if isinstance(agent_cfg, dict):
         t = agent_cfg.get('type', '')
-        if t in ('claude', 'codex', 'copilot', 'kimi'):
+        if t in ('claude', 'codex', 'copilot', 'kimi', 'cursor'):
             print(t); sys.exit(0)
     elif isinstance(agent_cfg, str):
-        if agent_cfg in ('claude', 'codex', 'copilot', 'kimi'):
+        if agent_cfg in ('claude', 'codex', 'copilot', 'kimi', 'cursor'):
             print(agent_cfg); sys.exit(0)
     default = cli.get('default', 'claude')
-    if default in ('claude', 'codex', 'copilot', 'kimi'):
+    if default in ('claude', 'codex', 'copilot', 'kimi', 'cursor'):
         print(default)
     else:
         print('claude', file=sys.stderr)
@@ -167,6 +167,13 @@ build_cli_command() {
             fi
             echo "$cmd"
             ;;
+        cursor)
+            local cmd="agent --force"
+            if [[ -n "$model" ]]; then
+                cmd="$cmd --model $model"
+            fi
+            echo "$cmd"
+            ;;
         *)
             echo "claude --dangerously-skip-permissions"
             ;;
@@ -174,7 +181,7 @@ build_cli_command() {
 }
 
 # get_instruction_file(agent_id [,cli_type])
-# CLIが自動読込すべき指示書ファイルのパスを返す
+# エージェントが追加で読むべき role-specific 指示書ファイルのパスを返す
 get_instruction_file() {
     local agent_id="$1"
     local cli_type="${2:-$(get_cli_type "$agent_id")}"
@@ -196,6 +203,7 @@ get_instruction_file() {
         codex)   echo "instructions/codex-${role}.md" ;;
         copilot) echo ".github/copilot-instructions-${role}.md" ;;
         kimi)    echo "instructions/generated/kimi-${role}.md" ;;
+        cursor)  echo "instructions/generated/cursor-${role}.md" ;;
         *)       echo "instructions/${role}.md" ;;
     esac
 }
@@ -227,6 +235,18 @@ validate_cli_availability() {
         kimi)
             if ! command -v kimi-cli &>/dev/null && ! command -v kimi &>/dev/null; then
                 echo "[ERROR] Kimi CLI not found. Install from https://platform.moonshot.cn/" >&2
+                return 1
+            fi
+            ;;
+        cursor)
+            command -v agent &>/dev/null || {
+                echo "[ERROR] Cursor Agent CLI not found. Install from https://cursor.com/install" >&2
+                return 1
+            }
+            local cursor_status
+            cursor_status=$(agent status 2>&1 || true)
+            if echo "$cursor_status" | grep -qiE 'not logged in|sign in'; then
+                echo "[ERROR] Cursor Agent CLI is not logged in. Run: agent login" >&2
                 return 1
             fi
             ;;
@@ -266,6 +286,13 @@ get_agent_model() {
     cli_type=$(get_cli_type "$agent_id")
 
     case "$cli_type" in
+        cursor)
+            case "$agent_id" in
+                shogun|gunshi)    echo "claude-4.6-sonnet-medium-thinking" ;;
+                karo|ashigaru*)   echo "claude-4.6-sonnet-medium" ;;
+                *)                echo "claude-4.6-sonnet-medium" ;;
+            esac
+            ;;
         kimi)
             # Kimi CLI用デフォルトモデル
             case "$agent_id" in
@@ -321,15 +348,18 @@ get_model_display_name() {
             ;;
     esac
 
-    # Thinking表示: Claude系はデフォルトONなので、falseの時だけ非表示
-    # Claude: thinking: false → なし, それ以外(true/未設定) → "+T"
-    # Codex等: Thinkingなし → 常になし
+    # Thinking表示:
+    # - Claude: thinking: false → なし, それ以外(true/未設定) → "+T"
+    # - Cursor: thinking系モデル名なら "+T"
+    # - その他: 常になし
     if [[ "$cli_type" == "claude" ]]; then
         if [[ "$thinking" == "false" || "$thinking" == "False" ]]; then
             echo "$short"
         else
             echo "${short}+T"
         fi
+    elif [[ "$cli_type" == "cursor" && "$model" == *thinking* ]]; then
+        echo "${short}+T"
     else
         echo "$short"
     fi
@@ -339,6 +369,7 @@ get_model_display_name() {
 # CLIが初回起動時に自動実行すべき初期プロンプトを返す
 # Codex CLI: [PROMPT]引数として渡す（サジェストUI停止問題の根本対策）
 # Claude Code: 空（CLAUDE.md自動読込でSession Start手順が起動）
+# Cursor CLI: role-specific 指示書を最初に読む
 # Copilot/Kimi: 空（今後対応）
 get_startup_prompt() {
     local agent_id="$1"
@@ -348,6 +379,27 @@ get_startup_prompt() {
     case "$cli_type" in
         codex)
             echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read queue/tasks/${agent_id}.yaml. 3) Read queue/inbox/${agent_id}.yaml, mark read:true. 4) Read files listed in context_files. 5) Execute the assigned task to completion — edit files, run commands, write reports. Keep working until the task is done."
+            ;;
+        cursor)
+            local instruction_file
+            instruction_file=$(get_instruction_file "$agent_id" "cursor" 2>/dev/null || echo "")
+            case "$agent_id" in
+                shogun)
+                    echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read ${instruction_file}. 3) Read queue/inbox/shogun.yaml. 4) Read queue/shogun_to_karo.yaml. 5) Review queue/reports/ashigaru1_report.yaml through queue/reports/ashigaru7_report.yaml and queue/reports/gunshi_report.yaml if present. 6) Continue the assigned coordination work without stopping early."
+                    ;;
+                karo)
+                    echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read ${instruction_file}. 3) Read queue/inbox/karo.yaml and mark processed messages read:true. 4) Read queue/shogun_to_karo.yaml and queue/tasks/pending.yaml if present. 5) Read files listed in context_files. 6) Execute the assigned coordination task to completion — update YAML, dispatch work, run commands, write reports. Keep working until the task is done."
+                    ;;
+                gunshi)
+                    echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read ${instruction_file}. 3) Read queue/tasks/gunshi.yaml. 4) Read queue/inbox/gunshi.yaml and mark processed messages read:true. 5) Read files listed in context_files. 6) Execute the assigned task to completion — edit files, run commands, write reports. Keep working until the task is done."
+                    ;;
+                ashigaru*)
+                    echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read ${instruction_file}. 3) Read queue/tasks/${agent_id}.yaml. 4) Read queue/inbox/${agent_id}.yaml and mark processed messages read:true. 5) Read files listed in context_files. 6) Execute the assigned task to completion — edit files, run commands, write reports. Keep working until the task is done."
+                    ;;
+                *)
+                    echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read ${instruction_file}. 3) Read queue/inbox/${agent_id}.yaml. 4) Read files listed in context_files. 5) Execute the assigned task to completion — edit files, run commands, write reports. Keep working until the task is done."
+                    ;;
+            esac
             ;;
         *)
             echo ""
@@ -682,12 +734,13 @@ get_switch_recommendation() {
 
 # can_model_switch(cli_type)
 # 指定CLI種別でmodel_switchが可能か判定
-# 出力: "full" (Claude: /modelコマンド対応) | "limited" (Codex: 同CLI内のみ) | "none"
+# 出力: "full" (Claude/Cursor: /modelコマンド対応) | "limited" (Codex: 同CLI内のみ) | "none"
 can_model_switch() {
     local cli_type="$1"
 
     case "$cli_type" in
         claude)  echo "full" ;;
+        cursor)  echo "full" ;;
         codex)   echo "limited" ;;
         copilot) echo "none" ;;
         kimi)    echo "none" ;;

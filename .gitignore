@@ -38,6 +38,7 @@
 !instructions/cli_specific/codex_tools.md
 !instructions/cli_specific/copilot_tools.md
 !instructions/cli_specific/kimi_tools.md
+!instructions/cli_specific/cursor_tools.md
 
 # Multi-CLI: Build template parts (roles, common sections)
 !instructions/roles/
@@ -57,6 +58,11 @@
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
+
+# Cursor CLI auto-load rules
+!.cursor/
+!.cursor/rules/
+!.cursor/rules/*.mdc
 
 # Setup and deployment scripts
 !shutsujin_departure.sh

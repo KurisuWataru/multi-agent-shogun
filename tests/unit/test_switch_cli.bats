@@ -32,6 +32,9 @@ cli:
       type: claude
       model: claude-opus-4-6
       thinking: true
+    ashigaru6:
+      type: cursor
+      model: claude-4.6-sonnet-medium
     gunshi:
       type: claude
       model: claude-opus-4-6
@@ -201,6 +204,30 @@ PYEOF
     [[ "$result" == MAX_THINKING_TOKENS=0* ]]
 }
 
+@test "update_settings: cursor変更後にbuild_cli_commandが反映" {
+    cp "${TEST_TMP}/settings.yaml" "${TEST_TMP}/settings_update_cursor.yaml"
+
+    "${PROJECT_ROOT}/.venv/bin/python3" << PYEOF
+import yaml
+
+path = "${TEST_TMP}/settings_update_cursor.yaml"
+with open(path, 'r') as f:
+    data = yaml.safe_load(f) or {}
+
+data['cli']['agents']['ashigaru1']['type'] = 'cursor'
+data['cli']['agents']['ashigaru1']['model'] = 'claude-4.6-sonnet-medium'
+
+with open(path, 'w') as f:
+    yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+PYEOF
+
+    export CLI_ADAPTER_SETTINGS="${TEST_TMP}/settings_update_cursor.yaml"
+    source "${PROJECT_ROOT}/lib/cli_adapter.sh"
+
+    result=$(build_cli_command "ashigaru1")
+    [ "$result" = "agent --force --model claude-4.6-sonnet-medium" ]
+}
+
 # =============================================================================
 # switch_cli.sh 引数パーステスト（--help, バリデーション）
 # =============================================================================
@@ -284,4 +311,20 @@ YAML
     # ashigaru5は thinking:true
     result=$(get_model_display_name "ashigaru5")
     [ "$result" = "Opus+T" ]
+}
+
+@test "display_name: Cursor thinking model → Sonnet+T" {
+    cat > "${TEST_TMP}/settings_cursor_display.yaml" << 'YAML'
+cli:
+  default: claude
+  agents:
+    ashigaru6:
+      type: cursor
+      model: claude-4.6-sonnet-medium-thinking
+YAML
+    export CLI_ADAPTER_SETTINGS="${TEST_TMP}/settings_cursor_display.yaml"
+    source "${PROJECT_ROOT}/lib/cli_adapter.sh"
+
+    result=$(get_model_display_name "ashigaru6")
+    [ "$result" = "Sonnet+T" ]
 }

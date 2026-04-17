@@ -55,6 +55,10 @@
 #   T-CRESET-003: send_context_reset — sends /clear for ashigaru
 #   T-COPILOT-001: send_cli_command — copilot /clear → Ctrl-C + restart
 #   T-COPILOT-002: send_cli_command — copilot /model → skip
+#   T-CURSOR-001: send_cli_command — cursor /clear → /new-chat
+#   T-CURSOR-002: send_cli_command — cursor /model passes through without C-c
+#   T-CURSOR-003: send_wakeup_with_escape — cursor falls back to plain nudge
+#   T-CURSOR-004: agent_is_busy — cursor sign-in screen is idle
 
 # --- セットアップ ---
 
@@ -551,13 +555,15 @@ MOCK
 
 # --- T-CODEX-006: inbox_watcher.sh has agent_is_busy and Codex/Copilot handlers ---
 
-@test "T-CODEX-006: inbox_watcher.sh contains agent_is_busy and Codex/Copilot handlers" {
+@test "T-CODEX-006: inbox_watcher.sh contains agent_is_busy and Codex/Copilot/Cursor handlers" {
     grep -q "agent_is_busy()" "$WATCHER_SCRIPT"
     # Busy detection patterns live in lib/agent_status.sh (shared library)
     grep -q 'Working|Thinking|Planning|Sending' "$PROJECT_ROOT/lib/agent_status.sh"
 
     # Codex /clear → /new conversion exists
     grep -q '/new' "$WATCHER_SCRIPT"
+    # Cursor /clear → /new-chat conversion exists
+    grep -q '/new-chat' "$WATCHER_SCRIPT"
 
     # Codex /model skip exists
     grep -q 'not supported on codex' "$WATCHER_SCRIPT"
@@ -810,6 +816,64 @@ YAML
 
     ! grep -q "send-keys.*/model" "$MOCK_LOG"
     echo "$output" | grep -q "not supported on copilot"
+}
+
+# --- T-CURSOR-001: cursor /clear → /new-chat ---
+
+@test "T-CURSOR-001: send_cli_command converts /clear to /new-chat for cursor" {
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        CLI_TYPE="cursor"
+        send_cli_command "/clear"
+    '
+    [ "$status" -eq 0 ]
+
+    grep -q "send-keys.*/new-chat" "$MOCK_LOG"
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    grep -q "send-keys.*Session Start" "$MOCK_LOG"
+}
+
+# --- T-CURSOR-002: cursor /model passthrough ---
+
+@test "T-CURSOR-002: send_cli_command passes /model through for cursor without C-c" {
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        CLI_TYPE="cursor"
+        send_cli_command "/model claude-4.6-sonnet-medium"
+    '
+    [ "$status" -eq 0 ]
+
+    grep -q "send-keys.*/model claude-4.6-sonnet-medium" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+}
+
+# --- T-CURSOR-003: Escape escalation suppressed ---
+
+@test "T-CURSOR-003: send_wakeup_with_escape suppresses Escape for cursor and sends plain nudge" {
+    run bash -c '
+        MOCK_PANE_CLI="cursor"
+        source "'"$TEST_HARNESS"'"
+        CLI_TYPE="cursor"
+        send_wakeup_with_escape 2
+    '
+    [ "$status" -eq 0 ]
+
+    grep -q "send-keys.*inbox2" "$MOCK_LOG"
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+}
+
+# --- T-CURSOR-004: Cursor sign-in screen is idle ---
+
+@test "T-CURSOR-004: agent_is_busy returns 1 when Cursor shows sign-in screen" {
+    run bash -c '
+        MOCK_CAPTURE_PANE="$(printf "Cursor Agent\nPress any key to sign in...\n")"
+        source "'"$TEST_HARNESS"'"
+        CLI_TYPE="cursor"
+        LAST_CLEAR_TS=0
+        agent_is_busy
+    '
+    [ "$status" -eq 1 ]
 }
 
 # --- T-SHOGUN-001: session_has_client — client attached ---

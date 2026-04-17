@@ -30,7 +30,7 @@ if [ "${__INBOX_WATCHER_TESTING__:-}" != "1" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     AGENT_ID="$1"
     PANE_TARGET="$2"
-    CLI_TYPE="${3:-claude}"  # CLI種別（claude/codex/copilot）。未指定→claude（後方互換）
+    CLI_TYPE="${3:-claude}"  # CLI種別（claude/codex/copilot/kimi/cursor）。未指定→claude（後方互換）
 
     INBOX="$SCRIPT_DIR/queue/inbox/${AGENT_ID}.yaml"
     LOCKFILE="${INBOX}.lock"
@@ -230,7 +230,7 @@ should_throttle_nudge() {
 
 is_valid_cli_type() {
     case "${1:-}" in
-        claude|codex|copilot|kimi) return 0 ;;
+        claude|codex|copilot|kimi|cursor) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -447,8 +447,11 @@ PY
 
 # ─── Send CLI command via pty direct write ───
 # For /clear and /model only. These are CLI commands, not conversation messages.
-# CLI_TYPE別分岐: claude→そのまま, codex→/clear対応・/modelスキップ,
-#                  copilot→Ctrl-C+再起動・/modelスキップ
+# CLI_TYPE別分岐:
+#   claude → そのまま
+#   codex → /clear を /new に変換、/model スキップ
+#   cursor → /clear を /new-chat に変換、/model はサポート
+#   copilot → Ctrl-C + 再起動、/model スキップ
 # 実行時にtmux paneの @agent_cli を再確認し、ドリフト時はpane値を優先する。
 send_cli_command() {
     local cmd="$1"
@@ -514,6 +517,22 @@ send_cli_command() {
                 return 0
             fi
             ;;
+        cursor)
+            if [[ "$cmd" == "/clear" ]]; then
+                if [ "${NEW_CONTEXT_SENT:-0}" -eq 1 ]; then
+                    echo "[$(date)] [SKIP] Cursor /new-chat already sent for $AGENT_ID — skipping duplicate clear_command" >&2
+                    return 0
+                fi
+                echo "[$(date)] [SEND-KEYS] Cursor /clear→/new-chat: starting new conversation for $AGENT_ID" >&2
+                timeout 5 tmux send-keys -t "$PANE_TARGET" "/new-chat" 2>/dev/null || true
+                sleep 0.5
+                timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+                sleep 2
+                send_cursor_startup_prompt
+                NEW_CONTEXT_SENT=1
+                return 0
+            fi
+            ;;
         copilot)
             # Copilot: /clearはCtrl-C+再起動, /model非対応→スキップ
             if [[ "$cmd" == "/clear" ]]; then
@@ -536,8 +555,8 @@ send_cli_command() {
 
     echo "[$(date)] [SEND-KEYS] Sending CLI command to $AGENT_ID ($effective_cli): $actual_cmd" >&2
     # Clear stale input first, then send command (text and Enter separated for Codex TUI)
-    # Codex CLI: C-c when idle causes CLI to exit — skip it
-    if [[ "$effective_cli" != "codex" ]]; then
+    # Codex/Cursor CLI: avoid C-c when idle. It can dismiss or interrupt the TUI.
+    if [[ "$effective_cli" != "codex" && "$effective_cli" != "cursor" ]]; then
         timeout 5 tmux send-keys -t "$PANE_TARGET" C-c 2>/dev/null || true
         sleep 0.5
     fi
@@ -598,11 +617,31 @@ send_codex_startup_prompt() {
     STARTUP_PROMPT_SENT=1
 }
 
+# ─── Send Cursor startup prompt after /new-chat ───
+# Cursor supports /new-chat for context reset. After starting a fresh chat,
+# send the bootstrap prompt so the agent reloads its role-specific instructions.
+send_cursor_startup_prompt() {
+    sleep 2
+
+    local startup_prompt=""
+    if type get_startup_prompt &>/dev/null; then
+        startup_prompt=$(get_startup_prompt "$AGENT_ID" 2>/dev/null || true)
+    fi
+    if [[ -z "$startup_prompt" ]]; then
+        startup_prompt="Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message to identify yourself. 2) Read instructions/generated/cursor-ashigaru.md. 3) Read queue/tasks/${AGENT_ID}.yaml. 4) Read queue/inbox/${AGENT_ID}.yaml and mark processed messages read:true. 5) Execute the assigned task to completion."
+    fi
+    echo "[$(date)] [STARTUP] Sending startup prompt to $AGENT_ID (cursor): ${startup_prompt:0:80}..." >&2
+    timeout 5 tmux send-keys -l -t "$PANE_TARGET" "$startup_prompt" 2>/dev/null || true
+    sleep 0.3
+    timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+    STARTUP_PROMPT_SENT=1
+}
+
 # ─── Send context reset before new task ───
 # Called when task_assigned is detected in unread messages.
 # Sends the appropriate "new conversation" command per CLI type to clear
 # stale context from the previous task.
-# CLI mapping: claude→/clear, codex→/new, copilot→/clear, kimi→/clear
+# CLI mapping: claude→/clear, codex→/new, cursor→/new-chat, copilot→/clear, kimi→/clear
 send_context_reset() {
     local effective_cli
     effective_cli=$(get_effective_cli_type)
@@ -619,6 +658,7 @@ send_context_reset() {
     local reset_cmd
     case "$effective_cli" in
         codex)    reset_cmd="/new" ;;
+        cursor)   reset_cmd="/new-chat" ;;
         claude)   reset_cmd="/clear" ;;
         copilot)  reset_cmd="/clear" ;;
         kimi)     reset_cmd="/clear" ;;
@@ -642,6 +682,15 @@ send_context_reset() {
         sleep 3
         # Wait for idle + send startup prompt via shared helper
         send_codex_startup_prompt
+        return 0
+    fi
+
+    if [[ "$effective_cli" == "cursor" ]]; then
+        timeout 5 tmux send-keys -t "$PANE_TARGET" "/new-chat" 2>/dev/null || true
+        sleep 0.5
+        timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+        sleep 2
+        send_cursor_startup_prompt
         return 0
     fi
 
@@ -857,10 +906,10 @@ send_wakeup_with_escape() {
         return 0
     fi
 
-    # Codex CLI: ESC は「中断」になりやすく、人間操作中の事故も多い。
+    # Codex/Cursor CLI: ESC は「中断」やモード遷移になりやすい。
     # Phase 2 の Escape エスカレーションは無効化し、通常 nudge のみに落とす。
-    if [[ "$effective_cli" == "codex" ]]; then
-        echo "[$(date)] [SKIP] codex: suppressing Escape escalation for $AGENT_ID; sending plain nudge" >&2
+    if [[ "$effective_cli" == "codex" || "$effective_cli" == "cursor" ]]; then
+        echo "[$(date)] [SKIP] ${effective_cli}: suppressing Escape escalation for $AGENT_ID; sending plain nudge" >&2
         send_wakeup "$unread_count"
         return 0
     fi

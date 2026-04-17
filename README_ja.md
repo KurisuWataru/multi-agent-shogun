@@ -4,7 +4,7 @@
 
 **AIコーディング軍団統率システム — Multi-CLI対応**
 
-*コマンド1つで、10体のAIエージェントが並列稼働 — **Claude Code / OpenAI Codex / GitHub Copilot / Kimi Code** 混成軍*
+*コマンド1つで、10体のAIエージェントが並列稼働 — **Claude Code / OpenAI Codex / Cursor CLI / GitHub Copilot / Kimi Code** 混成軍*
 
 **Talk Coding — Vibe Codingではなく、スマホに話すだけでAIが実行**
 
@@ -32,7 +32,7 @@
 
 ## クイックスタート
 
-**必要なもの:** tmux、bash 4+、以下のいずれか: [Claude Code](https://claude.ai/code) / Codex / Copilot / Kimi
+**必要なもの:** tmux、bash 4+、以下のいずれか: [Claude Code](https://claude.ai/code) / Codex / Cursor CLI / Copilot / Kimi
 
 ```bash
 git clone https://github.com/yohey-w/multi-agent-shogun
@@ -54,7 +54,7 @@ bash shutsujin_departure.sh  # 全エージェント起動
 
 ## これは何？
 
-**multi-agent-shogun** は、複数のAIコーディングCLIインスタンスを同時に実行し、戦国時代の軍制のように統率するシステムです。**Claude Code**、**OpenAI Codex**、**GitHub Copilot**、**Kimi Code** の4CLIに対応。
+**multi-agent-shogun** は、複数のAIコーディングCLIインスタンスを同時に実行し、戦国時代の軍制のように統率するシステムです。**Claude Code**、**OpenAI Codex**、**Cursor CLI**、**GitHub Copilot**、**Kimi Code** の5CLIに対応。
 
 **なぜ使うのか？**
 - 1つの命令で、7体のAIワーカー+1体の軍師が並列で実行
@@ -91,7 +91,7 @@ bash shutsujin_departure.sh  # 全エージェント起動
 | **アーキテクチャ** | 1プロセス内のサブエージェント | リード+チームメイト（JSONメールボックス） | グラフベースの状態機械 | ロールベースエージェント | tmux経由の階層構造 |
 | **並列性** | 逐次実行（1つずつ） | 複数の独立セッション | 並列ノード（v0.2+） | 限定的 | **8体の独立エージェント** |
 | **連携コスト** | TaskごとにAPIコール | 高い（各チームメイト=別コンテキスト） | API + インフラ（Postgres/Redis） | API + CrewAIプラットフォーム | **ゼロ**（YAML + tmux） |
-| **Multi-CLI** | Claude Codeのみ | Claude Codeのみ | 任意のLLM API | 任意のLLM API | **4 CLI**（Claude/Codex/Copilot/Kimi） |
+| **Multi-CLI** | Claude Codeのみ | Claude Codeのみ | 任意のLLM API | 任意のLLM API | **5 CLI**（Claude/Codex/Cursor/Copilot/Kimi） |
 | **可観測性** | Claudeのログのみ | tmux分割ペインまたはインプロセス | LangSmith連携 | OpenTelemetry | **ライブtmuxペイン** + ダッシュボード |
 | **スキル発見** | なし | なし | なし | なし | **ボトムアップ自動提案** |
 | **セットアップ** | Claude Code内蔵 | 内蔵（実験的） | 重い（インフラ必要） | pip install | シェルスクリプト |
@@ -121,12 +121,13 @@ bash shutsujin_departure.sh  # 全エージェント起動
 
 ### Multi-CLI対応
 
-将軍システムは特定ベンダーに依存しない。4つのCLIツールに対応し、それぞれの強みを活かす：
+将軍システムは特定ベンダーに依存しない。5つのCLIツールに対応し、それぞれの強みを活かす：
 
 | CLI | 特徴 | デフォルトモデル |
 |-----|------|-----------------|
 | **Claude Code** | tmux統合の実績、Memory MCP、専用ファイルツール（Read/Write/Edit/Glob/Grep） | Claude Sonnet 4.6 |
 | **OpenAI Codex** | サンドボックス実行、JSONL構造化出力、`codex exec` ヘッドレスモード | gpt-5.3-codex |
+| **Cursor CLI** | エディタと同じ Agent/Plan/Ask モード、`.cursor/rules` + `AGENTS.md` + `CLAUDE.md` 自動読込、`/new-chat` と `/model` 対応 | claude-4.6-sonnet-medium / claude-4.6-sonnet-medium-thinking |
 | **GitHub Copilot** | GitHub MCP組込、4種の特化エージェント（Explore/Task/Plan/Code-review）、`/delegate` | Claude Sonnet 4.6 |
 | **Kimi Code** | 無料プランあり、多言語サポート | Kimi k2 |
 
@@ -137,13 +138,17 @@ instructions/
 ├── common/              # 共通ルール（全CLI共通）
 ├── cli_specific/        # CLI固有のツール説明
 │   ├── claude_tools.md  # Claude Code ツール・機能
-│   └── copilot_tools.md # GitHub Copilot CLI ツール・機能
+│   ├── codex_tools.md   # OpenAI Codex CLI ツール・機能
+│   ├── copilot_tools.md # GitHub Copilot CLI ツール・機能
+│   ├── cursor_tools.md  # Cursor CLI ツール・機能
+│   └── kimi_tools.md    # Kimi Code CLI ツール・機能
 └── roles/               # ロール定義（将軍、家老、足軽）
     ↓ ビルド
-CLAUDE.md / AGENTS.md / copilot-instructions.md  ← CLI別に生成
+CLAUDE.md / AGENTS.md / copilot-instructions.md / .cursor/rules/*.mdc  ← CLI自動読込面
 ```
 
 ルールの変更は1箇所。全CLIに反映。同期ズレなし。
+Cursor は `.cursor/rules` を薄い bootstrap として使い、`instructions/generated/cursor-*.md` を role 固有マニュアルとして使います。
 
 ---
 
@@ -255,9 +260,13 @@ claude --dangerously-skip-permissions
 #    → ブラウザが開く → Anthropicアカウントでログイン → CLIに戻る
 #    → 「Bypass Permissions」の承認画面 → 「Yes, I accept」を選択（↓キーで2を選んでEnter）
 #    → /exit で退出
+
+# 3. Cursor ワーカーを使う場合は Cursor も一度だけ認証
+agent login
+agent status   # "Not logged in" が消えていればOK
 ```
 
-認証情報は `~/.claude/` に保存され、以降は不要。
+各CLIは認証情報をローカルに保存するため、通常はマシンごとに一度だけ認証すれば十分です。
 
 #### 📅 毎日の起動（初回セットアップ後）
 
@@ -452,7 +461,7 @@ wsl --install
 
 ### `shutsujin_departure.sh` が行うこと：
 - ✅ tmuxセッションを作成（shogun + multiagent）
-- ✅ 全エージェントでClaude Codeを起動
+- ✅ 全エージェントで設定済みのAI CLIを起動
 - ✅ 各エージェントに指示書を自動読み込み
 - ✅ キューファイルをリセットして新しい状態に
 - ✅ ntfyリスナーを起動してスマホ通知を有効化（設定済みの場合）
@@ -704,7 +713,7 @@ multiagent:agents.1            BUSY       ashigaru1
 multiagent:agents.8            BUSY       gunshi
 ```
 
-判定は **Claude Code** と **Codex CLI** の両方に対応。各tmuxペインの末尾5行からCLI固有のプロンプト/スピナーパターンを検出。判定ロジックは `lib/agent_status.sh` に分離されており、自作スクリプトからも利用可能：
+判定は **Claude Code**、**Codex CLI**、および基本的な **Cursor CLI** 画面に対応。各tmuxペインの末尾5行からCLI固有のプロンプト/スピナーパターンを検出。判定ロジックは `lib/agent_status.sh` に分離されており、自作スクリプトからも利用可能：
 
 ```bash
 source lib/agent_status.sh
@@ -1382,7 +1391,7 @@ cp config/ntfy_auth.env.sample config/ntfy_auth.env
 │      │                                                              │
 │      ├──▶ キューファイルとダッシュボードをリセット                     │
 │      │                                                              │
-│      └──▶ 全エージェントでClaude Codeを起動                          │
+│      └──▶ 全エージェントで設定済みのAI CLIを起動                      │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -1393,10 +1402,10 @@ cp config/ntfy_auth.env.sample config/ntfy_auth.env
 <summary><b>shutsujin_departure.sh オプション</b>（クリックで展開）</summary>
 
 ```bash
-# デフォルト: フル起動（tmuxセッション + Claude Code起動）
+# デフォルト: フル起動（tmuxセッション + AI CLI起動）
 ./shutsujin_departure.sh
 
-# セッションセットアップのみ（Claude Code起動なし）
+# セッションセットアップのみ（AI CLI起動なし）
 ./shutsujin_departure.sh -s
 ./shutsujin_departure.sh --setup-only
 
@@ -1439,9 +1448,10 @@ tmux attach-session -t shogun     # 接続してコマンドを出す
 ```bash
 ./shutsujin_departure.sh -s       # セッションのみ作成
 
-# 特定のエージェントでClaude Codeを手動起動
-tmux send-keys -t shogun:0 'claude --dangerously-skip-permissions' Enter
-tmux send-keys -t multiagent:0.0 'claude --dangerously-skip-permissions' Enter
+# 特定のエージェントで設定済みCLIを手動起動
+source ./lib/cli_adapter.sh
+tmux send-keys -t shogun:0 "$(build_cli_command shogun)" Enter
+tmux send-keys -t multiagent:0.0 "$(build_cli_command karo)" Enter
 ```
 
 **クラッシュ後の再起動：**
@@ -1494,11 +1504,14 @@ multi-agent-shogun/
 │   ├── gunshi.md             # 軍師の指示書
 │   └── cli_specific/         # CLI固有のツール説明
 │       ├── claude_tools.md   # Claude Code ツール・機能
-│       └── copilot_tools.md  # GitHub Copilot CLI ツール・機能
+│       ├── codex_tools.md    # OpenAI Codex CLI ツール・機能
+│       ├── copilot_tools.md  # GitHub Copilot CLI ツール・機能
+│       ├── cursor_tools.md   # Cursor CLI ツール・機能
+│       └── kimi_tools.md     # Kimi Code CLI ツール・機能
 │
 ├── lib/
-│   ├── agent_status.sh       # 共有 稼働/待機 判定（Claude Code + Codex）
-│   ├── cli_adapter.sh        # Multi-CLIアダプタ（Claude/Codex/Copilot/Kimi）
+│   ├── agent_status.sh       # 共有 稼働/待機 判定（Claude Code + Codex + Cursor）
+│   ├── cli_adapter.sh        # Multi-CLIアダプタ（Claude/Codex/Cursor/Copilot/Kimi）
 │   └── ntfy_auth.sh          # ntfy認証ヘルパー
 │
 ├── scripts/                  # ユーティリティスクリプト

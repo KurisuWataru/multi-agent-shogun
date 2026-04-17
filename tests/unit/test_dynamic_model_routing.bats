@@ -718,7 +718,7 @@ load_adapter_with() {
 
 # --- TC-DMR-130〜131: NFR-03 CLI互換性 ---
 
-@test "TC-DMR-130: NFR-03 model_switchはClaude足軽のみ有効" {
+@test "TC-DMR-130: NFR-03 Codex足軽はlimited switch" {
     load_adapter_with "${TEST_TMP}/settings_with_tiers.yaml"
     # codex足軽: switchは可能だがCLI跨ぎ注意
     result=$(can_model_switch "codex")
@@ -728,6 +728,12 @@ load_adapter_with() {
 @test "TC-DMR-131: NFR-03 Claude足軽はfull switch可能" {
     load_adapter_with "${TEST_TMP}/settings_with_tiers.yaml"
     result=$(can_model_switch "claude")
+    [ "$result" = "full" ]
+}
+
+@test "TC-DMR-132: NFR-03 Cursor足軽はfull switch可能" {
+    load_adapter_with "${TEST_TMP}/settings_with_tiers.yaml"
+    result=$(can_model_switch "cursor")
     [ "$result" = "full" ]
 }
 

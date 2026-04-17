@@ -18,7 +18,7 @@
 #   1. Status bar check (last non-empty line): 'esc to' only appears in
 #      Claude Code's status bar during active processing. This is the most
 #      reliable busy signal — immune to old spinner text in scroll-back.
-#   2. Idle checks: CLI-specific idle prompts (❯, Codex ? prompt)
+#   2. Idle checks: CLI-specific idle prompts (❯, Codex ? prompt, Cursor sign-in/prompt)
 #   3. Text-based busy markers: spinner keywords in bottom 5 lines
 #
 # Why this order matters:
@@ -67,12 +67,16 @@ agent_is_busy_check() {
     fi
 
     # ── Idle checks ──
+    # Cursor sign-in / auth-needed screen
+    if echo "$pane_tail" | grep -qiE '(Press any key to sign in|Not logged in)'; then
+        return 1
+    fi
     # Codex idle prompt
     if echo "$pane_tail" | grep -qE '(\? for shortcuts|context left)'; then
         return 1
     fi
-    # Claude Code bare prompt
-    if echo "$pane_tail" | grep -qE '^(❯|›)\s*$'; then
+    # Claude Code / Cursor bare prompt
+    if echo "$pane_tail" | grep -qE '^(❯|›|>)\s*$'; then
         return 1
     fi
 

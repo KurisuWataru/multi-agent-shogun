@@ -71,6 +71,9 @@ EOFYAML
         kimi)
             cat "$PARTS_DIR/cli_specific/kimi_tools.md" >> "$output_path"
             ;;
+        cursor)
+            cat "$PARTS_DIR/cli_specific/cursor_tools.md" >> "$output_path"
+            ;;
     esac
 
     echo "  ✅ Created: $output_filename"
@@ -99,6 +102,12 @@ build_instruction_file "kimi" "shogun" "kimi-shogun.md"
 build_instruction_file "kimi" "karo" "kimi-karo.md"
 build_instruction_file "kimi" "ashigaru" "kimi-ashigaru.md"
 build_instruction_file "kimi" "gunshi" "kimi-gunshi.md"
+
+# Build Cursor instruction files
+build_instruction_file "cursor" "shogun" "cursor-shogun.md"
+build_instruction_file "cursor" "karo" "cursor-karo.md"
+build_instruction_file "cursor" "ashigaru" "cursor-ashigaru.md"
+build_instruction_file "cursor" "gunshi" "cursor-gunshi.md"
 
 # ============================================================
 # AGENTS.md generation (Codex auto-load file)
@@ -234,10 +243,49 @@ EOFYAML
     echo "  ✅ Created: agents/default/agent.yaml"
 }
 
+# ============================================================
+# Cursor CLI bootstrap rule generation
+# ============================================================
+# Cursor CLI reads .cursor/rules alongside AGENTS.md / CLAUDE.md.
+# Keep the rule small and delegate the heavy role guidance to
+# instructions/generated/cursor-*.md.
+generate_cursor_rule() {
+    local rules_dir="$ROOT_DIR/.cursor/rules"
+    local output_path="$rules_dir/cursor-agent-bootstrap.mdc"
+
+    echo "Generating: .cursor/rules/cursor-agent-bootstrap.mdc (Cursor auto-load)"
+
+    mkdir -p "$rules_dir"
+
+    cat > "$output_path" <<'EOFRULE'
+---
+description: Bootstrap tmux-managed Cursor agents for multi-agent-shogun
+alwaysApply: true
+---
+
+# Cursor Agent Bootstrap
+
+If you are running inside a tmux-managed `multi-agent-shogun` agent pane:
+
+- Identify your role with `tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'`.
+- Read the matching role manual before handling inbox or task YAML:
+  `instructions/generated/cursor-shogun.md`,
+  `instructions/generated/cursor-karo.md`,
+  `instructions/generated/cursor-gunshi.md`,
+  or `instructions/generated/cursor-ashigaru.md` for any `ashigaru*`.
+- Use Cursor session commands: `/new-chat` to reset context, `/model <name>` to switch models, `/quit` to exit before relaunch.
+
+If you are not inside a tmux-managed agent pane, ignore these tmux-specific steps and continue normally.
+EOFRULE
+
+    echo "  ✅ Created: .cursor/rules/cursor-agent-bootstrap.mdc"
+}
+
 # Generate CLI auto-load files
 generate_agents_md
 generate_copilot_instructions
 generate_kimi_instructions
+generate_cursor_rule
 
 echo ""
 echo "=== Build Complete ==="
@@ -251,3 +299,4 @@ echo "CLI auto-load files:"
 [ -f "$ROOT_DIR/.github/copilot-instructions.md" ] && ls -lh "$ROOT_DIR/.github/copilot-instructions.md"
 [ -f "$ROOT_DIR/agents/default/system.md" ] && ls -lh "$ROOT_DIR/agents/default/system.md"
 [ -f "$ROOT_DIR/agents/default/agent.yaml" ] && ls -lh "$ROOT_DIR/agents/default/agent.yaml"
+[ -f "$ROOT_DIR/.cursor/rules/cursor-agent-bootstrap.mdc" ] && ls -lh "$ROOT_DIR/.cursor/rules/cursor-agent-bootstrap.mdc"
